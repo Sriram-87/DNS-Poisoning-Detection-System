@@ -1,0 +1,15 @@
+{
+    "interface": null,
+    "trusted_domains_file": "trusted_domains.json",
+    "alert_threshold": 3,
+    "ttl_deviation_threshold": 0.5,
+    "min_ttl": 60,
+    "max_analysis_records": 100,
+    "log_file": "dns_monitor.log",
+    "dashboard_enabled": false,
+    "dashboard_port": 8080,
+    "external_apis": [],
+    "blacklisted_ips": [],
+    "whitelisted_domains": [],
+    "update_interval": 3600
+}

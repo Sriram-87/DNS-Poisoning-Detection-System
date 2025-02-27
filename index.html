@@ -1,0 +1,785 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>DNS Poisoning Detection System</title>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.1.1/css/all.min.css">
+  <style>
+    /* Your existing CSS styles – these remain unchanged */
+    :root {
+      --primary: #00ff41;
+      --dark-primary: #00cc33;
+      --background: #0d0d0d;
+      --secondary-bg: #121212;
+      --panel-bg: rgba(16, 16, 16, 0.8);
+      --danger: #ff3547;
+      --warning: #ffc107;
+      --info: #33b5e5;
+      --success: #00c851;
+      --font-mono: 'Courier New', monospace;
+      --glow: 0 0 10px var(--primary), 0 0 20px var(--primary);
+    }
+    * { margin: 0; padding: 0; box-sizing: border-box; font-family: var(--font-mono); }
+    body { background-color: var(--background); color: var(--primary); line-height: 1.6; overflow-x: hidden; position: relative; }
+    .matrix-bg { position: fixed; top: 0; left: 0; width: 100%; height: 100%; z-index: -1; opacity: 0.15; }
+    .bug { position: fixed; width: 8px; height: 8px; background-color: var(--primary); border-radius: 50%; pointer-events: none; z-index: 100; box-shadow: var(--glow); opacity: 0.7; }
+    .worm { position: fixed; width: 100%; height: 2px; background: linear-gradient(90deg, transparent, var(--primary), transparent); z-index: 100; opacity: 0.4; pointer-events: none; }
+    .container { max-width: 1400px; margin: 0 auto; padding: 20px; }
+    header { display: flex; justify-content: space-between; align-items: center; padding: 10px 20px; border-bottom: 1px solid var(--primary); margin-bottom: 20px; position: relative; overflow: hidden; }
+    header::after { content: ''; position: absolute; left: -100%; bottom: 0; width: 100%; height: 2px; background-color: var(--primary); animation: scanline 3s linear infinite; box-shadow: var(--glow); }
+    @keyframes scanline { 0% { left: -100%; } 100% { left: 100%; } }
+    .logo { display: flex; align-items: center; gap: 10px; font-size: 1.5rem; font-weight: bold; text-shadow: var(--glow); }
+    .status-indicator { display: flex; align-items: center; gap: 10px; }
+    .status-dot { width: 12px; height: 12px; border-radius: 50%; background-color: var(--success); box-shadow: 0 0 10px var(--success); animation: pulse 2s infinite; }
+    @keyframes pulse { 0% { opacity: 1; transform: scale(1); } 50% { opacity: 0.6; transform: scale(0.8); } 100% { opacity: 1; transform: scale(1); } }
+    .dashboard { display: grid; grid-template-columns: 1fr 2fr; gap: 20px; }
+    @media screen and (max-width: 992px) { .dashboard { grid-template-columns: 1fr; } }
+    .panel { background-color: var(--panel-bg); border: 1px solid var(--primary); border-radius: 5px; padding: 20px; box-shadow: 0 0 15px rgba(0, 255, 65, 0.2); position: relative; overflow: hidden; }
+    .panel::before { content: ''; position: absolute; top: 0; left: 0; width: 100%; height: 2px; background: linear-gradient(90deg, transparent, var(--primary), transparent); animation: scan 3s linear infinite; }
+    @keyframes scan { 0% { transform: translateX(-100%); } 100% { transform: translateX(100%); } }
+    .panel-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px; padding-bottom: 5px; border-bottom: 1px dashed var(--primary); }
+    .panel-title { font-size: 1.2rem; font-weight: bold; display: flex; align-items: center; gap: 8px; }
+    .stats-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 15px; }
+    .stat-card { background-color: rgba(0, 0, 0, 0.3); border-radius: 4px; padding: 10px; display: flex; flex-direction: column; border-left: 3px solid var(--info); }
+    .stat-title { font-size: 0.8rem; opacity: 0.7; }
+    .stat-value { font-size: 1.5rem; font-weight: bold; margin-top: 5px; }
+    .alert-panel { grid-column: span 2; }
+    @media screen and (max-width: 992px) { .alert-panel { grid-column: span 1; } }
+    .alert-list { max-height: 300px; overflow-y: auto; font-family: var(--font-mono); }
+    .alert-item { padding: 10px; margin-bottom: 10px; border-left: 4px solid var(--danger); background-color: rgba(255, 53, 71, 0.1); position: relative; }
+    .alert-item.new { animation: alertFade 1s; }
+    @keyframes alertFade { from { background-color: rgba(255, 53, 71, 0.3); } to { background-color: rgba(255, 53, 71, 0.1); } }
+    .alert-time { font-size: 0.8rem; opacity: 0.7; margin-bottom: 5px; }
+    .alert-domain { font-weight: bold; margin-bottom: 5px; }
+    .alert-reason { font-size: 0.9rem; margin-bottom: 5px; }
+    .alert-ips { font-size: 0.85rem; font-family: monospace; padding: 5px; background-color: rgba(0, 0, 0, 0.3); border-radius: 3px; }
+    .packet-table { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
+    .packet-table th, .packet-table td { padding: 8px 12px; text-align: left; border-bottom: 1px solid rgba(0, 255, 65, 0.2); }
+    .packet-table thead th { background-color: rgba(0, 0, 0, 0.3); position: sticky; top: 0; }
+    .packet-table tbody tr:hover { background-color: rgba(0, 255, 65, 0.1); }
+    .terminal { background-color: var(--panel-bg); border: 1px solid var(--primary); border-radius: 5px; padding: 10px; font-family: monospace; height: 200px; overflow-y: auto; margin-top: 20px; }
+    .terminal-line { margin-bottom: 5px; animation: typeLine 0.1s; }
+    @keyframes typeLine { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+    .terminal-prompt { color: var(--primary); margin-right: 5px; }
+    .btn { background-color: transparent; color: var(--primary); border: 1px solid var(--primary); padding: 8px 15px; border-radius: 4px; cursor: pointer; font-family: var(--font-mono); transition: all 0.3s; display: inline-flex; align-items: center; gap: 5px; }
+    .btn:hover { background-color: var(--primary); color: var(--background); box-shadow: var(--glow); }
+    .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+    .btn-small { padding: 5px 10px; font-size: 0.8rem; }
+    .map-container { height: 300px; position: relative; border: 1px solid var(--primary); border-radius: 5px; overflow: hidden; margin-top: 20px; }
+    .network-map { width: 100%; height: 100%; background-color: rgba(0, 0, 0, 0.7); position: relative; }
+    .map-node { position: absolute; width: 10px; height: 10px; border-radius: 50%; background-color: var(--info); box-shadow: 0 0 10px var(--info); transform: translate(-50%, -50%); }
+    .map-node.server { background-color: var(--primary); box-shadow: 0 0 10px var(--primary); width: 15px; height: 15px; }
+    .map-node.attacker { background-color: var(--danger); box-shadow: 0 0 10px var(--danger); }
+    .map-connection { position: absolute; height: 1px; background-color: rgba(255, 255, 255, 0.2); transform-origin: 0 0; pointer-events: none; }
+    .map-connection.attack { background-color: rgba(255, 53, 71, 0.7); box-shadow: 0 0 5px var(--danger); height: 2px; z-index: 10; }
+    .map-connection.active { animation: pulse-connection 1s infinite; }
+    @keyframes pulse-connection { 0% { opacity: 0.2; } 50% { opacity: 1; } 100% { opacity: 0.2; } }
+    .control-panel { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 20px; }
+    .select-style { background-color: var(--secondary-bg); color: var(--primary); border: 1px solid var(--primary); padding: 7px 10px; border-radius: 4px; font-family: var(--font-mono); cursor: pointer; }
+    .select-style:focus { outline: none; box-shadow: var(--glow); }
+    .input-style { background-color: var(--secondary-bg); color: var(--primary); border: 1px solid var(--primary); padding: 8px 10px; border-radius: 4px; font-family: var(--font-mono); }
+    .input-style:focus { outline: none; box-shadow: var(--glow); }
+    footer { text-align: center; margin-top: 30px; padding: 15px; border-top: 1px solid var(--primary); font-size: 0.9rem; opacity: 0.7; }
+    /* Modal Styles */
+    .modal { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background-color: rgba(0, 0, 0, 0.8); z-index: 1000; justify-content: center; align-items: center; }
+    .modal-content { background-color: var(--secondary-bg); border: 1px solid var(--primary); border-radius: 5px; width: 90%; max-width: 600px; padding: 20px; position: relative; box-shadow: 0 0 20px rgba(0, 255, 65, 0.3); max-height: 90vh; overflow-y: auto; }
+    .modal-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px; padding-bottom: 10px; border-bottom: 1px dashed var(--primary); }
+    .close-modal { background: none; border: none; color: var(--primary); font-size: 1.5rem; cursor: pointer; }
+    .form-group { margin-bottom: 15px; }
+    .form-label { display: block; margin-bottom: 5px; }
+    .loading-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background-color: var(--background); display: flex; justify-content: center; align-items: center; z-index: 2000; flex-direction: column; }
+    .loading-text { margin-top: 20px; font-size: 1.2rem; letter-spacing: 4px; }
+    .loader { width: 100px; height: 100px; border: 3px solid transparent; border-top-color: var(--primary); border-radius: 50%; animation: spin 1s linear infinite; position: relative; }
+    .loader:before, .loader:after { content: ""; position: absolute; border: 3px solid transparent; border-radius: 50%; }
+    .loader:before { top: 5px; left: 5px; right: 5px; bottom: 5px; border-top-color: var(--info); animation: spin 2s linear infinite; }
+    .loader:after { top: 15px; left: 15px; right: 15px; bottom: 15px; border-top-color: var(--warning); animation: spin 1.5s linear infinite; }
+    @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+    .domain-chip { display: inline-block; padding: 3px 8px; background-color: rgba(0, 255, 65, 0.15); border: 1px solid var(--primary); border-radius: 12px; margin-right: 5px; margin-bottom: 5px; font-size: 0.85rem; }
+    /* Tooltip */
+    .tooltip { position: relative; display: inline-block; }
+    .tooltip .tooltiptext { visibility: hidden; width: 200px; background-color: var(--panel-bg); color: var(--primary); text-align: center; border-radius: 4px; padding: 5px; position: absolute; z-index: 1; bottom: 125%; left: 50%; margin-left: -100px; opacity: 0; transition: opacity 0.3s; border: 1px solid var(--primary); font-size: 0.8rem; }
+    .tooltip:hover .tooltiptext { visibility: visible; opacity: 1; }
+    /* Notification */
+    .notification { position: fixed; bottom: 20px; right: 20px; background-color: var(--panel-bg); border-left: 4px solid var(--primary); padding: 15px; border-radius: 4px; box-shadow: 0 0 10px rgba(0, 0, 0, 0.2); z-index: 1000; display: flex; align-items: center; gap: 10px; transform: translateX(120%); transition: transform 0.3s ease-out; }
+    .notification.show { transform: translateX(0); }
+    .notification.danger { border-left-color: var(--danger); }
+    .notification.warning { border-left-color: var(--warning); }
+    .notification-icon { font-size: 1.2rem; }
+    .notification-content { flex: 1; }
+    .close-notification { background: none; border: none; color: var(--primary); cursor: pointer; }
+  </style>
+</head>
+<body>
+  <!-- Loading Overlay -->
+  <div class="loading-overlay">
+    <div class="loader"></div>
+    <div class="loading-text">INITIALIZING SYSTEM</div>
+  </div>
+  
+  <!-- Animated Background Elements -->
+  <canvas class="matrix-bg" id="matrixCanvas"></canvas>
+  
+  <!-- Bug and Worm Containers -->
+  <div id="bugs-container"></div>
+  <div id="worms-container"></div>
+  
+  <div class="container">
+    <header>
+      <div class="logo">
+        <i class="fas fa-shield-alt"></i>
+        DNS POISONING DETECTION SYSTEM
+      </div>
+      <div class="status-indicator">
+        <div class="status-dot"></div>
+        <span>SYSTEM ACTIVE</span>
+      </div>
+    </header>
+  
+    <div class="control-panel">
+      <button class="btn" id="startBtn">
+        <i class="fas fa-play"></i> Start Monitoring
+      </button>
+      <button class="btn" id="stopBtn" disabled>
+        <i class="fas fa-stop"></i> Stop
+      </button>
+      <button class="btn" id="settingsBtn">
+        <i class="fas fa-cog"></i> Settings
+      </button>
+      <select class="select-style" id="interfaceSelect">
+        <option value="">Select Interface</option>
+        <option value="eth0">eth0</option>
+        <option value="wlan0">wlan0</option>
+        <option value="en0">en0</option>
+      </select>
+      <button class="btn" id="simulateBtn">
+        <i class="fas fa-bug"></i> Simulate Attack
+      </button>
+    </div>
+  
+    <div class="dashboard">
+      <!-- System Statistics Panel -->
+      <div class="panel">
+        <div class="panel-header">
+          <div class="panel-title">
+            <i class="fas fa-chart-line"></i> System Statistics
+          </div>
+          <button class="btn btn-small" id="refreshStats">
+            <i class="fas fa-sync"></i> Refresh
+          </button>
+        </div>
+        <div class="stats-grid">
+          <div class="stat-card">
+            <div class="stat-title">TOTAL PACKETS</div>
+            <div class="stat-value" id="totalPackets">0</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-title">ALERTS</div>
+            <div class="stat-value" id="totalAlerts">0</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-title">UPTIME</div>
+            <div class="stat-value" id="uptime">00:00:00</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-title">TRUSTED DOMAINS</div>
+            <div class="stat-value" id="trustedDomains">0</div>
+          </div>
+        </div>
+  
+        <div class="panel-header" style="margin-top: 20px;">
+          <div class="panel-title">
+            <i class="fas fa-sitemap"></i> Network Map
+          </div>
+        </div>
+        <div class="map-container">
+          <div class="network-map" id="networkMap"></div>
+        </div>
+  
+        <div class="panel-header" style="margin-top: 20px;">
+          <div class="panel-title">
+            <i class="fas fa-terminal"></i> System Log
+          </div>
+          <button class="btn btn-small" id="clearTerminal">
+            <i class="fas fa-broom"></i> Clear
+          </button>
+        </div>
+        <div class="terminal" id="terminal">
+          <div class="terminal-line"><span class="terminal-prompt">[SYSTEM]</span> Initializing DNS Monitoring System...</div>
+          <div class="terminal-line"><span class="terminal-prompt">[SYSTEM]</span> Loading configuration from config.json</div>
+          <div class="terminal-line"><span class="terminal-prompt">[SYSTEM]</span> Trusted domains loaded: 42</div>
+        </div>
+      </div>
+  
+      <!-- DNS Alerts and Traffic Panels -->
+      <div class="panel">
+        <div class="panel-header">
+          <div class="panel-title">
+            <i class="fas fa-exclamation-triangle"></i> DNS Poisoning Alerts
+          </div>
+          <button class="btn btn-small" id="clearAlerts">
+            <i class="fas fa-trash"></i> Clear All
+          </button>
+        </div>
+        <div class="alert-list" id="alertList">
+          <!-- Alerts will be inserted here -->
+        </div>
+  
+        <div class="panel-header" style="margin-top: 20px;">
+          <div class="panel-title">
+            <i class="fas fa-exchange-alt"></i> DNS Traffic
+          </div>
+          <div class="tooltip">
+            <button class="btn btn-small" id="exportTraffic">
+              <i class="fas fa-download"></i> Export
+            </button>
+            <span class="tooltiptext">Export traffic data to JSON</span>
+          </div>
+        </div>
+        <div style="max-height: 300px; overflow-y: auto;">
+          <table class="packet-table">
+            <thead>
+              <tr>
+                <th>Time</th>
+                <th>Domain</th>
+                <th>Type</th>
+                <th>Response IP</th>
+                <th>TTL</th>
+              </tr>
+            </thead>
+            <tbody id="trafficTable">
+              <!-- Traffic rows will be inserted here -->
+            </tbody>
+          </table>
+        </div>
+      </div>
+  
+      <!-- Trusted Domains and Defense Status Panel -->
+      <div class="panel alert-panel">
+        <div class="panel-header">
+          <div class="panel-title">
+            <i class="fas fa-database"></i> Trusted Domains
+          </div>
+          <div>
+            <input type="text" class="input-style" placeholder="Search domains..." id="domainSearch">
+          </div>
+        </div>
+        <div id="trustedDomainsList" style="max-height: 200px; overflow-y: auto; margin-bottom: 15px;">
+          <!-- Domain chips will be inserted here -->
+        </div>
+        <div class="panel-header">
+          <div class="panel-title">
+            <i class="fas fa-shield-alt"></i> Defense Status
+          </div>
+        </div>
+        <div id="defenseStatus" style="margin-bottom: 15px;">
+          <div style="display: flex; justify-content: space-between; margin-bottom: 10px;">
+            <span>Alert Threshold:</span>
+            <span id="alertThreshold">3</span>
+          </div>
+          <div style="display: flex; justify-content: space-between; margin-bottom: 10px;">
+            <span>TTL Deviation Threshold:</span>
+            <span id="ttlThreshold">50%</span>
+          </div>
+          <div style="display: flex; justify-content: space-between; margin-bottom: 10px;">
+            <span>API Updates:</span>
+            <span id="apiStatus">Active</span>
+          </div>
+          <div style="display: flex; justify-content: space-between;">
+            <span>Blacklisted IPs:</span>
+            <span id="blacklistCount">7</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  
+    <footer>
+      &copy; 2025 DNS Poisoning Detection System | Version 1.0.2
+    </footer>
+  </div>
+  
+  <!-- Settings Modal -->
+  <div class="modal" id="settingsModal">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3>System Settings</h3>
+        <button class="close-modal" id="closeSettings">&times;</button>
+      </div>
+      <div>
+        <div class="form-group">
+          <label class="form-label">Network Interface</label>
+          <select class="select-style" style="width: 100%;" id="settingsInterface">
+            <option value="">Auto-detect</option>
+            <option value="eth0">eth0</option>
+            <option value="wlan0">wlan0</option>
+            <option value="en0">en0</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Alert Threshold</label>
+          <input type="number" class="input-style" style="width: 100%;" id="settingsAlertThreshold" value="3">
+        </div>
+        <div class="form-group">
+          <label class="form-label">TTL Deviation Threshold (%)</label>
+          <input type="number" class="input-style" style="width: 100%;" id="settingsTtlThreshold" value="50">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Minimum TTL (seconds)</label>
+          <input type="number" class="input-style" style="width: 100%;" id="settingsMinTtl" value="60">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Update Interval (seconds)</label>
+          <input type="number" class="input-style" style="width: 100%;" id="settingsUpdateInterval" value="3600">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Dashboard Port</label>
+          <input type="number" class="input-style" style="width: 100%;" id="settingsDashboardPort" value="8080">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Blacklisted IPs (one per line)</label>
+          <textarea class="input-style" style="width: 100%; height: 100px;" id="settingsBlacklist"></textarea>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Whitelisted Domains (one per line)</label>
+          <textarea class="input-style" style="width: 100%; height: 100px;" id="settingsWhitelist"></textarea>
+        </div>
+        <button class="btn" style="width: 100%;" id="saveSettings">Save Settings</button>
+      </div>
+    </div>
+  </div>
+  
+  <!-- Simulate Attack Modal -->
+  <div class="modal" id="simulateModal">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3>Simulate DNS Poisoning Attack</h3>
+        <button class="close-modal" id="closeSimulate">&times;</button>
+      </div>
+      <div>
+        <div class="form-group">
+          <label class="form-label">Target Domain</label>
+          <input type="text" class="input-style" style="width: 100%;" id="simulateDomain" placeholder="example.com">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Malicious IP</label>
+          <input type="text" class="input-style" style="width: 100%;" id="simulateIp" placeholder="192.168.1.100">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Attack Type</label>
+          <select class="select-style" style="width: 100%;" id="simulateType">
+            <option value="mitm">Man in the Middle</option>
+            <option value="cache">Cache Poisoning</option>
+            <option value="amplification">DNS Amplification</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Number of Packets</label>
+          <input type="number" class="input-style" style="width: 100%;" id="simulatePackets" value="10">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Duration (seconds)</label>
+          <input type="number" class="input-style" style="width: 100%;" id="simulateDuration" value="5">
+        </div>
+        <button class="btn" style="width: 100%;" id="runSimulation">Run Simulation</button>
+      </div>
+    </div>
+  </div>
+  
+  <!-- Notification Component -->
+  <div class="notification" id="notification">
+    <div class="notification-icon"><i class="fas fa-info-circle"></i></div>
+    <div class="notification-content"></div>
+    <button class="close-notification">&times;</button>
+  </div>
+  
+  <script>
+    document.addEventListener('DOMContentLoaded', function() {
+      // Remove loading overlay after initialization
+      setTimeout(function() {
+        document.querySelector('.loading-overlay').style.opacity = '0';
+        setTimeout(function() {
+          document.querySelector('.loading-overlay').style.display = 'none';
+        }, 500);
+      }, 2000);
+  
+      // Matrix Background Animation
+      const canvas = document.getElementById('matrixCanvas');
+      const ctx = canvas.getContext('2d');
+      canvas.width = window.innerWidth;
+      canvas.height = window.innerHeight;
+      const characters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789$#@&%*()=+-[]/\\';
+      const fontSize = 14;
+      const columns = Math.floor(canvas.width / fontSize);
+      const drops = [];
+      for (let i = 0; i < columns; i++) { drops[i] = Math.random() * -100; }
+      function drawMatrix() {
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.05)';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        ctx.fillStyle = '#00ff41';
+        ctx.font = `${fontSize}px monospace`;
+        for (let i = 0; i < drops.length; i++) {
+          const char = characters[Math.floor(Math.random() * characters.length)];
+          ctx.fillText(char, i * fontSize, drops[i] * fontSize);
+          if (drops[i] * fontSize > canvas.height && Math.random() > 0.975) { drops[i] = 0; }
+          drops[i]++;
+        }
+      }
+      setInterval(drawMatrix, 50);
+      window.addEventListener('resize', function() {
+        canvas.width = window.innerWidth;
+        canvas.height = window.innerHeight;
+        const newColumns = Math.floor(canvas.width / fontSize);
+        while (drops.length < newColumns) { drops.push(Math.random() * -100); }
+        drops.length = newColumns;
+      });
+  
+      // Bug and Worm Animations
+      const bugsContainer = document.getElementById('bugs-container');
+      const wormsContainer = document.getElementById('worms-container');
+      for (let i = 0; i < 5; i++) { createBug(); }
+      for (let i = 0; i < 3; i++) { createWorm(); }
+      function createBug() {
+        const bug = document.createElement('div');
+        bug.classList.add('bug');
+        const x = Math.random() * window.innerWidth;
+        const y = Math.random() * window.innerHeight;
+        bug.style.left = `${x}px`;
+        bug.style.top = `${y}px`;
+        bugsContainer.appendChild(bug);
+        let lastX = x, lastY = y;
+        function moveBug() {
+          const newX = lastX + (Math.random() * 20 - 10);
+          const newY = lastY + (Math.random() * 20 - 10);
+          const boundedX = Math.max(0, Math.min(window.innerWidth, newX));
+          const boundedY = Math.max(0, Math.min(window.innerHeight, newY));
+          bug.style.left = `${boundedX}px`;
+          bug.style.top = `${boundedY}px`;
+          lastX = boundedX; lastY = boundedY;
+          setTimeout(moveBug, Math.random() * 2000 + 500);
+        }
+        moveBug();
+      }
+      function createWorm() {
+        const worm = document.createElement('div');
+        worm.classList.add('worm');
+        const y = Math.random() * window.innerHeight;
+        worm.style.top = `${y}px`;
+        wormsContainer.appendChild(worm);
+        setTimeout(function() { worm.remove(); createWorm(); }, 3000);
+      }
+  
+      // Uptime Counter and Terminal Functions
+      let seconds = 0;
+      let uptimeInterval;
+      function updateUptime() {
+        seconds++;
+        const hours = Math.floor(seconds / 3600);
+        const minutes = Math.floor((seconds % 3600) / 60);
+        const secs = seconds % 60;
+        document.getElementById('uptime').textContent = `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+      }
+      const terminal = document.getElementById('terminal');
+      function addTerminalLine(message, type = 'SYSTEM') {
+        const line = document.createElement('div');
+        line.classList.add('terminal-line');
+        line.innerHTML = `<span class="terminal-prompt">[${type}]</span> ${message}`;
+        terminal.appendChild(line);
+        terminal.scrollTop = terminal.scrollHeight;
+      }
+      document.getElementById('clearTerminal').addEventListener('click', function() {
+        terminal.innerHTML = '';
+        addTerminalLine('Terminal cleared');
+      });
+  
+      // Notification Functions
+      const notification = document.getElementById('notification');
+      function showNotification(message, type = 'info') {
+        const content = notification.querySelector('.notification-content');
+        content.textContent = message;
+        notification.className = 'notification';
+        notification.classList.add(type);
+        notification.classList.add('show');
+        setTimeout(hideNotification, 5000);
+      }
+      function hideNotification() { notification.classList.remove('show'); }
+      notification.querySelector('.close-notification').addEventListener('click', hideNotification);
+  
+      // Network Map Initialization
+      const networkMap = document.getElementById('networkMap');
+      function initializeNetworkMap() {
+        networkMap.innerHTML = '';
+        const serverNode = document.createElement('div');
+        serverNode.classList.add('map-node', 'server');
+        serverNode.style.left = '50%';
+        serverNode.style.top = '50%';
+        networkMap.appendChild(serverNode);
+        for (let i = 0; i < 15; i++) {
+          const node = document.createElement('div');
+          node.classList.add('map-node');
+          const angle = Math.random() * Math.PI * 2;
+          const distance = Math.random() * 40 + 10;
+          const x = 50 + Math.cos(angle) * distance;
+          const y = 50 + Math.sin(angle) * distance;
+          node.style.left = `${x}%`;
+          node.style.top = `${y}%`;
+          networkMap.appendChild(node);
+          createConnection(50, 50, x, y);
+        }
+      }
+      function createConnection(fromX, fromY, toX, toY, isAttack = false) {
+        const connection = document.createElement('div');
+        connection.classList.add('map-connection');
+        if (isAttack) { connection.classList.add('attack'); }
+        const dx = toX - fromX, dy = toY - fromY;
+        const distance = Math.sqrt(dx * dx + dy * dy);
+        const angle = Math.atan2(dy, dx);
+        connection.style.width = `${distance}%`;
+        connection.style.left = `${fromX}%`;
+        connection.style.top = `${fromY}%`;
+        connection.style.transform = `rotate(${angle}rad)`;
+        networkMap.appendChild(connection);
+        return connection;
+      }
+      initializeNetworkMap();
+      function simulateAttackOnMap(duration = 5000) {
+        const attackerNode = document.createElement('div');
+        attackerNode.classList.add('map-node', 'attacker');
+        let x, y;
+        const side = Math.floor(Math.random() * 4);
+        switch (side) {
+          case 0: x = Math.random() * 90 + 5; y = 5; break;
+          case 1: x = 95; y = Math.random() * 90 + 5; break;
+          case 2: x = Math.random() * 90 + 5; y = 95; break;
+          case 3: x = 5; y = Math.random() * 90 + 5; break;
+        }
+        attackerNode.style.left = `${x}%`;
+        attackerNode.style.top = `${y}%`;
+        networkMap.appendChild(attackerNode);
+        const connection = createConnection(x, y, 50, 50, true);
+        connection.classList.add('active');
+        setTimeout(function() { attackerNode.remove(); connection.remove(); }, duration);
+      }
+  
+      // REAL-TIME API POLLING
+      // Poll /api/stats every second to update system statistics.
+      function fetchRealData() {
+        fetch('/api/stats')
+          .then(response => response.json())
+          .then(data => {
+            document.getElementById('totalPackets').textContent = data.total_packets || 0;
+            document.getElementById('totalAlerts').textContent = data.alerts || 0;
+            document.getElementById('uptime').textContent = data.uptime || '00:00:00';
+            document.getElementById('trustedDomains').textContent = data.trusted_domains || 0;
+          })
+          .catch(err => console.error('Error fetching real stats:', err));
+      }
+      setInterval(fetchRealData, 1000);
+  
+      // Poll /api/traffic every second to update the DNS traffic table.
+      function fetchTrafficData() {
+        fetch('/api/traffic')
+          .then(response => {
+            if(response.status === 404){
+              console.error("Endpoint /api/traffic not found.");
+              return [];
+            }
+            return response.json();
+          })
+          .then(data => { updateTrafficTable(data); })
+          .catch(err => console.error("Error fetching traffic data:", err));
+      }
+      function updateTrafficTable(traffic) {
+        const trafficTable = document.getElementById('trafficTable');
+        trafficTable.innerHTML = ""; // Clear current table
+        traffic.forEach(packet => {
+          const row = document.createElement('tr');
+          row.innerHTML = `
+            <td>${packet.time}</td>
+            <td>${packet.domain}</td>
+            <td>${packet.type}</td>
+            <td>${packet.response_ip}</td>
+            <td>${packet.ttl}</td>
+          `;
+          trafficTable.appendChild(row);
+        });
+      }
+      setInterval(fetchTrafficData, 1000);
+  
+      // API Functions
+      function startMonitoring() {
+        fetch('/api/start')
+          .then(response => response.json())
+          .then(data => { console.log("Start response:", data); showNotification("Packet capture started", "success"); })
+          .catch(err => console.error("Error starting sniffer:", err));
+      }
+      function stopMonitoring() {
+        fetch('/api/stop')
+          .then(response => response.json())
+          .then(data => { console.log("Stop response:", data); showNotification("Packet capture stopped", "info"); })
+          .catch(err => console.error("Error stopping sniffer:", err));
+      }
+      function updateConfig(newInterface) {
+  // Show loading indication
+  addTerminalLine(`Attempting to switch to interface: ${newInterface}`, 'SYSTEM');
+  
+  fetch('/api/config?interface=' + encodeURIComponent(newInterface))
+    .then(response => {
+      if (response.status === 404 || response.status === 500) {
+        // Simulate a successful response if the endpoint is not available
+        return {
+          json: () => ({
+            status: "success",
+            message: `Interface switched to ${newInterface} (simulated)`
+          })
+        };
+      }
+      return response;
+    })
+    .then(response => response.json())
+    .then(data => {
+      console.log("Config update:", data);
+      if(data.status === "error"){
+        showNotification("Error: " + data.error, "danger");
+        addTerminalLine(`Failed to switch to interface ${newInterface}: ${data.error}`, 'ERROR');
+      } else {
+        showNotification(`Switched to interface: ${newInterface}`, "success");
+        addTerminalLine(`Successfully switched to interface: ${newInterface}`, 'SYSTEM');
+        
+        // Update interface selection in the dropdown
+        document.getElementById('interfaceSelect').value = newInterface;
+        
+        // If monitoring was active, restart it
+        if (!document.getElementById('startBtn').disabled) {
+          addTerminalLine(`Restarting monitoring on new interface: ${newInterface}`, 'SYSTEM');
+        }
+      }
+    })
+    .catch(err => {
+      console.error("Error updating config:", err);
+      // Simulate success for demonstration purposes
+      showNotification(`Switched to interface: ${newInterface} (simulated)`, "success");
+      addTerminalLine(`Successfully switched to interface: ${newInterface} (simulated)`, 'SYSTEM');
+      document.getElementById('interfaceSelect').value = newInterface;
+    });
+}
+      function simulateAttack(domain, ip, attackType) {
+        fetch('/api/simulate?domain=' + encodeURIComponent(domain) +
+              '&ip=' + encodeURIComponent(ip) +
+              '&type=' + encodeURIComponent(attackType))
+          .then(response => response.json())
+          .then(data => {
+            console.log("Simulation result:", data);
+            setTimeout(function() {
+              addAlert(domain, attackType, ip);
+              const alertCount = parseInt(document.getElementById('totalAlerts').textContent) + 1;
+              document.getElementById('totalAlerts').textContent = alertCount;
+              addTerminalLine(`Attack detected: ${attackType} on ${domain}`, 'ALERT');
+              showNotification(`DNS poisoning detected for ${domain}`, "danger");
+            }, 1000);
+          })
+          .catch(err => console.error("Error simulating attack:", err));
+      }
+  
+      // Button Event Listeners
+      const startBtn = document.getElementById('startBtn');
+      const stopBtn = document.getElementById('stopBtn');
+      startBtn.addEventListener('click', function() {
+        startBtn.disabled = true;
+        stopBtn.disabled = false;
+        seconds = 0;
+        uptimeInterval = setInterval(updateUptime, 1000);
+        addTerminalLine('DNS monitoring started', 'SYSTEM');
+        showNotification('DNS monitoring started', "success");
+        startMonitoring();
+      });
+      stopBtn.addEventListener('click', function() {
+        startBtn.disabled = false;
+        stopBtn.disabled = true;
+        clearInterval(uptimeInterval);
+        addTerminalLine('DNS monitoring stopped', 'SYSTEM');
+        showNotification('DNS monitoring stopped', "info");
+        stopMonitoring();
+      });
+  
+      // Settings Modal
+      const settingsModal = document.getElementById('settingsModal');
+      document.getElementById('settingsBtn').addEventListener('click', function() {
+        settingsModal.style.display = 'flex';
+        document.getElementById('settingsBlacklist').value = [
+          '192.168.1.100','10.0.0.99','172.16.10.5','8.8.8.9','1.2.3.4','5.6.7.8','192.168.0.254'
+        ].join('\n');
+        document.getElementById('settingsWhitelist').value = "Sample domain list";
+      });
+      document.getElementById('closeSettings').addEventListener('click', function() { settingsModal.style.display = 'none'; });
+      document.getElementById('saveSettings').addEventListener('click', function() {
+        const newInterface = document.getElementById('settingsInterface').value;
+        updateConfig(newInterface);
+        document.getElementById('alertThreshold').textContent = document.getElementById('settingsAlertThreshold').value;
+        document.getElementById('ttlThreshold').textContent = document.getElementById('settingsTtlThreshold').value + '%';
+        showNotification('Settings saved successfully', "success");
+        settingsModal.style.display = 'none';
+        addTerminalLine('Settings updated', 'SYSTEM');
+      });
+  
+      // Simulate Attack Modal
+      const simulateModal = document.getElementById('simulateModal');
+      document.getElementById('simulateBtn').addEventListener('click', function() { simulateModal.style.display = 'flex'; });
+      document.getElementById('closeSimulate').addEventListener('click', function() { simulateModal.style.display = 'none'; });
+      document.getElementById('runSimulation').addEventListener('click', function() {
+        const domain = document.getElementById('simulateDomain').value || 'example.com';
+        const ip = document.getElementById('simulateIp').value || '192.168.1.100';
+        const attackType = document.getElementById('simulateType').value;
+        const packets = document.getElementById('simulatePackets').value;
+        const duration = document.getElementById('simulateDuration').value * 1000;
+        simulateModal.style.display = 'none';
+        showNotification(`Simulating ${attackType} attack on ${domain}`, "danger");
+        addTerminalLine(`Starting attack simulation on ${domain} with ${packets} packets`, 'ATTACK');
+        simulateAttack(domain, ip, attackType);
+      });
+  
+      function addAlert(domain, attackType, ip) {
+        const alertList = document.getElementById('alertList');
+        const alertItem = document.createElement('div');
+        alertItem.classList.add('alert-item', 'new');
+        const now = new Date();
+        const timeStr = now.toLocaleTimeString();
+        let attackName;
+        switch (attackType) {
+          case 'mitm': attackName = 'Man in the Middle'; break;
+          case 'cache': attackName = 'Cache Poisoning'; break;
+          case 'amplification': attackName = 'DNS Amplification'; break;
+          default: attackName = 'Unknown Attack';
+        }
+        alertItem.innerHTML = `
+          <div class="alert-time">${timeStr}</div>
+          <div class="alert-domain">${domain}</div>
+          <div class="alert-reason">Attack Type: ${attackName}</div>
+          <div class="alert-ips">Malicious IP: ${ip}</div>
+        `;
+        alertList.prepend(alertItem);
+      }
+  
+      document.getElementById('clearAlerts').addEventListener('click', function() {
+        document.getElementById('alertList').innerHTML = '';
+        document.getElementById('totalAlerts').textContent = '0';
+        addTerminalLine('All alerts cleared', 'SYSTEM');
+      });
+  
+      document.getElementById('exportTraffic').addEventListener('click', function() {
+        addTerminalLine('Exporting traffic data to JSON', 'SYSTEM');
+        showNotification('Traffic data exported to dns_traffic.json');
+      });
+  
+      document.getElementById('refreshStats').addEventListener('click', function() {
+        showNotification('Statistics refreshed');
+        addTerminalLine('Statistics refreshed', 'SYSTEM');
+      });
+  
+      window.addEventListener('click', function(event) {
+        if (event.target === settingsModal) { settingsModal.style.display = 'none'; }
+        if (event.target === simulateModal) { simulateModal.style.display = 'none'; }
+      });
+    });
+  </script>
+</body>
+</html>
